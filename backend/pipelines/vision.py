@@ -9,11 +9,14 @@ import logging
 import sys
 from datetime import datetime
 from io import BytesIO
+from typing import Any
 
 try:
     from PIL import Image, ImageGrab  # type: ignore[import-untyped]
     HAS_PILLOW = True
 except ImportError:
+    Image: Any = None
+    ImageGrab: Any = None
     HAS_PILLOW = False
 
 logger = logging.getLogger(__name__)

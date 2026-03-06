@@ -14,7 +14,7 @@ from google.genai import types  # type: ignore[import-unresolved]
 logger = logging.getLogger(__name__)
 
 # Model identifier for Gemini 2.5 Flash Live
-LIVE_MODEL = "gemini-2.5-flash-preview-native-audio-dialog"
+LIVE_MODEL = "gemini-2.5-flash-native-audio-latest"
 
 
 class ATOMSession:
@@ -89,7 +89,7 @@ When incident is resolved, announce it clearly and summarize the postmortem"""
         Keeps the WebSocket open until stop() cancels this task.
         """
         live_config = types.LiveConnectConfig(
-            response_modalities=["AUDIO"],
+            response_modalities=[types.Modality.AUDIO],
             speech_config=types.SpeechConfig(
                 voice_config=types.VoiceConfig(
                     prebuilt_voice_config=types.PrebuiltVoiceConfig(

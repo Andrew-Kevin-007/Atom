@@ -2,7 +2,9 @@
 ATOM Backend - Main FastAPI Application
 Real-time incident intelligence agent with Gemini Live API integration
 """
-
+import sys
+import os
+sys.path.append(os.path.dirname(__file__))
 import asyncio
 import logging
 import os
@@ -15,11 +17,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import dotenv
 
-from backend.gemini.session import ATOMSession
-from backend.pipelines.audio import AudioPipeline
-from backend.pipelines.vision import VisionPipeline
-from backend.pipelines.logs import LogPipeline
-from backend.state.firestore import FirestoreManager
+from gemini.session import ATOMSession
+from pipelines.audio import AudioPipeline
+from pipelines.vision import VisionPipeline
+from pipelines.logs import LogPipeline
+from state.firestore import FirestoreManager
 
 # Configure logging
 logging.basicConfig(
