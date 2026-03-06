@@ -15,39 +15,60 @@ function App() {
   const [isLoading, setIsLoading]     = useState(false);
   const [status, setStatus]           = useState('idle'); // idle | active | resolved
   const [slaSeconds, setSlaSeconds]   = useState(null);
+  const [postmortem, setPostmortem]   = useState(null);
   const [wsConnected, setWsConnected] = useState(false);
   const wsRef = useRef(null);
 
   /* ── WebSocket ─────────────────────────────────────────────── */
   const handleWsMessage = useCallback((data) => {
+    console.log('[WS] Received message:', data.type, data);
     const ts = new Date().toLocaleTimeString('en-US', { hour12: false });
+    
     switch (data.type) {
       case 'incident_started':
+        console.log('[WS] Incident started:', data.incident_id);
         setIncident({ id: data.incident_id, name: data.name, status: 'active' });
         setStatus('active');
         setMessages([]);
         setEvents([]);
+        setSlaSeconds(null);
+        setPostmortem(null);
         break;
+        
       case 'atom_response':
+        console.log('[WS] ATOM response received:', data.text);
         setMessages(p => [...p, { type: 'atom', text: data.text, ts }]);
         break;
+        
       case 'log_event':
+        console.log('[WS] Log event:', data.severity, data.message);
         setEvents(p => [...p, {
           message: data.message,
           severity: data.severity,
           ts,
           source: 'LOGS',
         }]);
-        if (data.message.includes('SLA breach imminent')) {
-          const m = data.message.match(/(\d+) seconds/);
-          if (m) setSlaSeconds(parseInt(m[1]));
-        }
         break;
+        
+      case 'sla_update':
+        console.log('[WS] SLA update:', data.sla_seconds_remaining);
+        setSlaSeconds(data.sla_seconds_remaining);
+        break;
+        
+      case 'postmortem_update':
+        console.log('[WS] Postmortem update received');
+        setPostmortem(data.content);
+        break;
+        
       case 'incident_resolved':
+        console.log('[WS] Incident resolved');
         setStatus('resolved');
         setIncident(p => p ? { ...p, status: 'resolved' } : null);
         break;
-      default: break;
+        
+      default:
+        console.log('[WS] Unknown message type:', data.type);
+        break;
     }
   }, []);
 
@@ -55,15 +76,44 @@ function App() {
     let alive = true;
     const connect = () => {
       if (!alive) return;
+      console.log('[WS] Attempting connection to', WS);
       const ws = new WebSocket(WS);
-      ws.onopen  = () => setWsConnected(true);
-      ws.onclose = () => { setWsConnected(false); setTimeout(connect, 3000); };
-      ws.onerror = () => ws.close();
-      ws.onmessage = (e) => handleWsMessage(JSON.parse(e.data));
+      
+      ws.onopen = () => {
+        console.log('[WS] Connection established');
+        setWsConnected(true);
+      };
+      
+      ws.onmessage = (e) => {
+        console.log('[WS] Raw message received:', e.data);
+        try {
+          const data = JSON.parse(e.data);
+          handleWsMessage(data);
+        } catch (err) {
+          console.error('[WS] Failed to parse message:', err);
+        }
+      };
+      
+      ws.onerror = (err) => {
+        console.error('[WS] WebSocket error:', err);
+        setWsConnected(false);
+      };
+      
+      ws.onclose = () => {
+        console.log('[WS] Connection closed, reconnecting in 3s...');
+        setWsConnected(false);
+        if (alive) setTimeout(connect, 3000);
+      };
+      
       wsRef.current = ws;
     };
+    
     connect();
-    return () => { alive = false; wsRef.current?.close(); };
+    return () => {
+      console.log('[WS] Cleanup: closing connection');
+      alive = false;
+      wsRef.current?.close();
+    };
   }, [handleWsMessage]);
 
   /* ── Actions ───────────────────────────────────────────────── */
@@ -205,7 +255,7 @@ function App() {
           {/* Right — SLA & Postmortem */}
           <div className="flex-1 flex flex-col gap-3 p-3 min-h-0">
             <div className="h-[38%] min-h-0"><SLACountdown seconds={slaSeconds} resolved={status === 'resolved'} /></div>
-            <div className="flex-1 min-h-0"><Postmortem incident={incident} /></div>
+            <div className="flex-1 min-h-0"><Postmortem incident={incident} postmortem={postmortem} /></div>
           </div>
         </main>
       )}

@@ -8,9 +8,10 @@ sys.path.append(os.path.dirname(__file__))
 import asyncio
 import logging
 import os
+import re
 import uuid
 from contextlib import asynccontextmanager
-from typing import Dict, Optional, Set
+from typing import Dict, List, Optional, Set
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -57,28 +58,81 @@ class IncidentResponse(BaseModel):
 
 # Global state
 active_incidents: Dict[str, Dict] = {}
-websocket_clients: Set[WebSocket] = set()
+
+
+class ConnectionManager:
+    """Manages WebSocket connections with proper lifecycle and keepalive."""
+    
+    def __init__(self):
+        """Initialize connection manager."""
+        self.active_connections: List[WebSocket] = []
+    
+    async def connect(self, websocket: WebSocket) -> None:
+        """
+        Accept and register a new WebSocket connection.
+        
+        Args:
+            websocket: WebSocket connection to accept
+        """
+        print(f"[WS] Attempting to accept WebSocket...")
+        try:
+            await websocket.accept()
+            print(f"[WS] ✓ WebSocket accepted successfully")
+            self.active_connections.append(websocket)
+            print(f"[WS] ✓ Connection registered ({len(self.active_connections)} total)")
+            logger.info(f"📡 New WebSocket client connected ({len(self.active_connections)} total)")
+        except Exception as e:
+            print(f"[WS] ✗ Failed to accept WebSocket: {e}")
+            logger.error(f"Failed to accept WebSocket: {e}")
+            raise
+    
+    async def disconnect(self, websocket: WebSocket) -> None:
+        """
+        Unregister and close a WebSocket connection.
+        
+        Args:
+            websocket: WebSocket connection to disconnect
+        """
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+            print(f"[WS] ✓ Connection disconnected ({len(self.active_connections)} remaining)")
+            logger.info(f"📡 Client disconnected ({len(self.active_connections)} remaining)")
+    
+    async def broadcast(self, message: Dict) -> None:
+        """
+        Broadcast message to all connected clients.
+        
+        Args:
+            message: Dictionary to broadcast as JSON
+        """
+        disconnected = []
+        
+        for connection in self.active_connections:
+            try:
+                await connection.send_json(message)
+            except Exception as e:
+                print(f"[WS] Warning: Failed to send to client: {e}")
+                logger.warning(f"Failed to broadcast to client: {e}")
+                disconnected.append(connection)
+        
+        # Clean up disconnected clients
+        for connection in disconnected:
+            await self.disconnect(connection)
+
+
+# Initialize connection manager
+manager = ConnectionManager()
 
 
 async def broadcast_to_clients(message: Dict) -> None:
     """
     Broadcast message to all connected WebSocket clients.
+    Uses the ConnectionManager to handle the actual broadcasting.
     
     Args:
         message: Dictionary to broadcast as JSON
     """
-    disconnected = set()
-    
-    for client in websocket_clients:
-        try:
-            await client.send_json(message)
-        except Exception as e:
-            logger.error(f"Error broadcasting to client: {e}")
-            disconnected.add(client)
-    
-    # Clean up disconnected clients
-    for client in disconnected:
-        websocket_clients.discard(client)
+    await manager.broadcast(message)
 
 
 async def on_atom_response(incident_id: str, text: str) -> None:
@@ -105,6 +159,7 @@ async def on_log_received(
 ) -> None:
     """
     Callback when log message received.
+    Broadcasts to WebSocket clients and handles SLA updates.
     
     Args:
         incident_id: Current incident ID
@@ -112,6 +167,9 @@ async def on_log_received(
         timestamp: Timestamp string
         severity: Log severity (INFO, WARNING, ERROR, CRITICAL)
     """
+    print(f"[CALLBACK] on_log_received: {severity} - {log_message[:60]}...")
+    
+    # Broadcast log event to all WebSocket clients
     await broadcast_to_clients({
         "type": "log_event",
         "incident_id": incident_id,
@@ -119,6 +177,27 @@ async def on_log_received(
         "timestamp": timestamp,
         "severity": severity,
     })
+    print(f"[CALLBACK] Broadcasted to WebSocket clients")
+    
+    # Handle SLA deadline updates
+    if "SLA breach imminent" in log_message and incident_id in active_incidents:
+        match = re.search(r'(\d+)\s+seconds', log_message)
+        if match:
+            sla_seconds = int(match.group(1))
+            incident_state = active_incidents[incident_id]
+            firestore_manager = incident_state.get("firestore")
+            if firestore_manager:
+                await firestore_manager.update_sla_deadline(incident_id, sla_seconds)
+                print(f"[CALLBACK] Updated SLA deadline: {sla_seconds} seconds")
+                
+                # Broadcast SLA update to frontend
+                await broadcast_to_clients({
+                    "type": "sla_update",
+                    "incident_id": incident_id,
+                    "sla_seconds_remaining": sla_seconds,
+                    "timestamp": timestamp,
+                })
+                print(f"[CALLBACK] Broadcasted SLA update to frontend")
 
 
 async def run_incident(incident_id: str) -> None:
@@ -170,6 +249,7 @@ async def run_incident(incident_id: str) -> None:
         
         # Start all pipelines concurrently
         logger.info(f"🚀 Starting all pipelines for incident {incident_id}")
+        print(f"[INCIDENT] Starting all pipelines: audio, vision, logs, gemini")
         
         # Create tasks
         audio_task = asyncio.create_task(audio_pipeline.start_streaming(atom_session))
@@ -178,8 +258,10 @@ async def run_incident(incident_id: str) -> None:
             log_pipeline.simulate_incident(atom_session, firestore_manager, incident_id)
         )
         
-        # Wait for all tasks to complete
-        await asyncio.gather(audio_task, vision_task, log_task, return_exceptions=True)
+        # Wait for all tasks to complete simultaneously
+        print(f"[INCIDENT] Awaiting all pipelines to complete...")
+        results = await asyncio.gather(audio_task, vision_task, log_task, return_exceptions=True)
+        print(f"[INCIDENT] All pipelines completed: {[type(r).__name__ for r in results]}")
         
         # Announce resolution
         await on_atom_response(incident_id, "INCIDENT RESOLVED. Generating postmortem...")
@@ -252,7 +334,7 @@ app = FastAPI(
 # Add CORS middleware for frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000", "*"],
+    allow_origins=["http://localhost:5173", "http://localhost:3000", "ws://localhost:5173", "*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -363,30 +445,80 @@ async def get_incident(incident_id: str) -> Dict:
 async def websocket_endpoint(websocket: WebSocket) -> None:
     """
     WebSocket endpoint for real-time incident updates.
+    Handles connection lifecycle with keepalive ping/pong.
     
     Args:
         websocket: WebSocket connection from frontend
     """
-    await websocket.accept()
-    websocket_clients.add(websocket)
+    print(f"[WS] New WebSocket connection request received")
     
-    logger.info(f"📡 New WebSocket client connected ({len(websocket_clients)} total)")
+    # Attempt to accept connection
+    try:
+        await manager.connect(websocket)
+    except Exception as e:
+        print(f"[WS] ✗ Failed to establish connection: {e}")
+        return
+    
+    # Keepalive task to send periodic pings
+    async def keepalive():
+        """Send periodic pings to keep connection alive."""
+        try:
+            while websocket in manager.active_connections:
+                await asyncio.sleep(30)  # Ping every 30 seconds
+                try:
+                    await websocket.send_json({"type": "ping"})
+                    print(f"[WS] ✓ Keepalive ping sent")
+                except Exception as e:
+                    print(f"[WS] Keepalive ping failed: {e}")
+                    break
+        except asyncio.CancelledError:
+            pass
+    
+    # Start keepalive task
+    keepalive_task = asyncio.create_task(keepalive())
     
     try:
+        print(f"[WS] Entering receive loop...")
         while True:
-            # Keep connection alive and receive any incoming messages
-            data = await websocket.receive_text()
-            
-            # Echo back or handle commands if needed
-            if data == "ping":
-                await websocket.send_text("pong")
-            
-    except WebSocketDisconnect:
-        logger.info(f"📡 Client disconnected ({len(websocket_clients)-1} remaining)")
-        websocket_clients.discard(websocket)
+            try:
+                # Wait for messages from client
+                data = await websocket.receive_text()
+                print(f"[WS] Received from client: {data}")
+                
+                # Handle client messages
+                if data == "ping":
+                    print(f"[WS] Client ping received, sending pong")
+                    try:
+                        await websocket.send_text("pong")
+                    except Exception as e:
+                        print(f"[WS] Failed to send pong: {e}")
+                        break
+                        
+            except WebSocketDisconnect:
+                print(f"[WS] Client explicitly disconnected")
+                break
+            except Exception as e:
+                print(f"[WS] Error in receive loop: {e}")
+                if "closed" in str(e).lower():
+                    break
+                await asyncio.sleep(0.1)
+    
     except Exception as e:
-        logger.error(f"WebSocket error: {e}")
-        websocket_clients.discard(websocket)
+        print(f"[WS] ✗ WebSocket handler error: {e}")
+        logger.error(f"WebSocket handler error: {e}")
+    
+    finally:
+        print(f"[WS] Cleaning up connection...")
+        # Cancel keepalive task
+        keepalive_task.cancel()
+        try:
+            await keepalive_task
+        except asyncio.CancelledError:
+            pass
+        
+        # Disconnect from manager
+        await manager.disconnect(websocket)
+        print(f"[WS] Connection cleanup complete")
 
 
 @app.get("/health")
@@ -395,7 +527,7 @@ async def health_check() -> Dict:
     return {
         "status": "healthy",
         "active_incidents": len(active_incidents),
-        "connected_clients": len(websocket_clients),
+        "connected_clients": len(manager.active_connections),
     }
 
 

@@ -5,6 +5,7 @@ Simulates live incident logs and streams to Gemini Live API
 
 import asyncio
 import logging
+import re
 from datetime import datetime
 from typing import Any, Callable, Optional
 
@@ -57,6 +58,7 @@ class LogPipeline:
         
         try:
             logger.info(f"🎬 Starting incident simulation ({len(self.DEMO_LOGS)} logs)")
+            print(f"[LOGS] Starting incident simulation with {len(self.DEMO_LOGS)} log events")
             
             for i, log_message in enumerate(self.DEMO_LOGS):
                 if not self.is_streaming:
@@ -74,17 +76,20 @@ class LogPipeline:
                 else:
                     severity = "INFO"
                 
-                # Send to ATOM
-                await session.send_log(log_message)
-                
-                # Log locally
+                # Print log locally for terminal visibility
+                print(f"[LOGS] [{i+1}/{len(self.DEMO_LOGS)}] [{timestamp}] {severity}: {log_message}")
                 logger.info(f"📝 [{timestamp}] {log_message}")
                 
-                # Notify callback (may return a coroutine / Task)
+                # Send to ATOM session
+                await session.send_log(log_message)
+                print(f"[LOGS] Sent to Gemini: {log_message[:60]}...")
+                
+                # Notify callback (broadcasts to websocket clients)
                 if self.on_log:
                     result = self.on_log(log_message, timestamp, severity)
                     if asyncio.isfuture(result) or asyncio.iscoroutine(result):
                         await result
+                    print(f"[LOGS] Broadcast to WebSocket clients")
                 
                 # Save to Firestore
                 if firestore_manager:
@@ -94,15 +99,27 @@ class LogPipeline:
                         log_message,
                         "LOGS"
                     )
+                    print(f"[LOGS] Saved to Firestore timeline")
+                    
+                    # Handle SLA deadline when breach is imminent
+                    if "SLA breach imminent" in log_message:
+                        # Extract seconds remaining
+                        match = re.search(r'(\d+)\s+seconds', log_message)
+                        if match:
+                            sla_seconds = int(match.group(1))
+                            await firestore_manager.update_sla_deadline(incident_id, sla_seconds)
+                            print(f"[LOGS] SLA deadline set: {sla_seconds} seconds remaining")
                 
                 # Wait before next log (except last one)
                 if i < len(self.DEMO_LOGS) - 1:
                     await asyncio.sleep(self.DEMO_LOG_INTERVAL)
             
             logger.info("✓ Incident simulation completed")
+            print(f"[LOGS] Incident simulation completed")
             
         except Exception as e:
             logger.error(f"✗ Log pipeline error: {e}")
+            print(f"[LOGS] ERROR: {e}")
         finally:
             self.is_streaming = False
 

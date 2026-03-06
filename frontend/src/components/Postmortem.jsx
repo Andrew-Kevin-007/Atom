@@ -11,10 +11,10 @@ const SECTIONS = [
 /**
  * Postmortem — auto-generated incident report
  */
-export default function Postmortem({ incident = null }) {
+export default function Postmortem({ incident = null, postmortem = null }) {
   const [copied, setCopied] = useState(false);
 
-  const pm          = incident?.postmortem || {};
+  const pm          = postmortem || incident?.postmortem || {};
   const actionItems = pm.actionItems || [];
   const resolved    = incident?.status === 'resolved';
   const hasContent  = SECTIONS.some(s => pm[s.key]);
