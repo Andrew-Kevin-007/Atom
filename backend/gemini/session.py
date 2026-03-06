@@ -13,8 +13,8 @@ from google.genai import types  # type: ignore[import-unresolved]
 
 logger = logging.getLogger(__name__)
 
-# Model identifier for Gemini 2.0 Flash Live
-LIVE_MODEL = "gemini-2.0-flash-live-001"
+# Model identifier for Gemini 2.5 Flash Live
+LIVE_MODEL = "gemini-2.5-flash-preview-native-audio-dialog"
 
 
 class ATOMSession:
@@ -89,7 +89,7 @@ When incident is resolved, announce it clearly and summarize the postmortem"""
         Keeps the WebSocket open until stop() cancels this task.
         """
         live_config = types.LiveConnectConfig(
-            response_modalities=["AUDIO", "TEXT"],
+            response_modalities=["AUDIO"],
             speech_config=types.SpeechConfig(
                 voice_config=types.VoiceConfig(
                     prebuilt_voice_config=types.PrebuiltVoiceConfig(
@@ -170,9 +170,7 @@ When incident is resolved, announce it clearly and summarize the postmortem"""
         try:
             await self.session.send(
                 input=types.LiveClientRealtimeInput(
-                    media_chunks=[
-                        types.Blob(mime_type="audio/pcm", data=audio_chunk)
-                    ]
+                    audio=types.Blob(mime_type="audio/pcm;rate=16000", data=audio_chunk)
                 ),
             )
         except Exception as e:
@@ -192,9 +190,7 @@ When incident is resolved, announce it clearly and summarize the postmortem"""
             image_bytes = base64.b64decode(image_base64)
             await self.session.send(
                 input=types.LiveClientRealtimeInput(
-                    media_chunks=[
-                        types.Blob(mime_type="image/jpeg", data=image_bytes)
-                    ]
+                    video=types.Blob(mime_type="image/jpeg", data=image_bytes)
                 ),
             )
         except Exception as e:

@@ -2,52 +2,71 @@
 @tailwind components;
 @tailwind utilities;
 
-* {
+/* ── Reset ──────────────────────────────────────────────────────────────── */
+*,
+*::before,
+*::after {
   margin: 0;
   padding: 0;
   box-sizing: border-box;
 }
 
-html, body, #root {
+html,
+body,
+#root {
   height: 100%;
   width: 100%;
   overflow: hidden;
 }
 
 body {
-  background-color: #0a0a0f;
-  color: #e0e0e0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-    sans-serif;
+  background-color: #000000;
+  color: rgba(255, 255, 255, 0.92);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text",
+    "Helvetica Neue", "Segoe UI", Roboto, system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
 }
 
-/* Scrollbar styling */
+/* ── Scrollbar ─────────────────────────────────────────────────────────── */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
 }
-
 ::-webkit-scrollbar-track {
   background: transparent;
 }
-
 ::-webkit-scrollbar-thumb {
-  background: #333;
-  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
 }
-
 ::-webkit-scrollbar-thumb:hover {
-  background: #555;
+  background: rgba(255, 255, 255, 0.14);
 }
 
-/* Animations */
-@keyframes slideIn {
+/* ── Glass Card ────────────────────────────────────────────────────────── */
+.glass {
+  background: rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(40px) saturate(1.2);
+  -webkit-backdrop-filter: blur(40px) saturate(1.2);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 16px;
+}
+
+.glass-subtle {
+  background: rgba(255, 255, 255, 0.02);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  border-radius: 14px;
+}
+
+/* ── Animations ────────────────────────────────────────────────────────── */
+@keyframes fadeUp {
   from {
     opacity: 0;
-    transform: translateY(10px);
+    transform: translateY(8px);
   }
   to {
     opacity: 1;
@@ -55,31 +74,59 @@ body {
   }
 }
 
-@keyframes pulse {
-  0%, 100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.5;
-  }
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
 
-.animate-slide-in {
-  animation: slideIn 0.3s ease-out;
+@keyframes pulseGlow {
+  0%, 100% { opacity: 0.6; }
+  50%      { opacity: 1; }
 }
 
-.animate-pulse {
-  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+@keyframes breathe {
+  0%, 100% { transform: scale(1); opacity: 0.4; }
+  50%      { transform: scale(1.8); opacity: 0; }
 }
 
-/* Smooth transitions */
-button, input, select, textarea {
-  transition: all 0.2s ease;
+@keyframes countdownPulse {
+  0%, 100% { text-shadow: 0 0 20px currentColor; }
+  50%      { text-shadow: 0 0 60px currentColor, 0 0 100px currentColor; }
 }
 
-/* Glassmorphism effect for cards */
-.glass {
-  background: rgba(18, 18, 26, 0.8);
-  backdrop-filter: blur(10px);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+.animate-fade-up {
+  animation: fadeUp 0.35s cubic-bezier(0.23, 1, 0.32, 1) both;
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.3s ease both;
+}
+
+.animate-pulse-glow {
+  animation: pulseGlow 2s ease-in-out infinite;
+}
+
+.animate-breathe {
+  animation: breathe 2.4s ease-in-out infinite;
+}
+
+.animate-countdown-pulse {
+  animation: countdownPulse 1s ease-in-out infinite;
+}
+
+/* ── Transitions ───────────────────────────────────────────────────────── */
+button,
+input,
+select,
+textarea {
+  transition: all 0.2s cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+/* ── Utility ───────────────────────────────────────────────────────────── */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }

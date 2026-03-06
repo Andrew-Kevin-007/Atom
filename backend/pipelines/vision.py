@@ -6,9 +6,15 @@ Captures screenshots and streams to Gemini Live API
 import asyncio
 import base64
 import logging
+import sys
 from datetime import datetime
 from io import BytesIO
-from PIL import Image, ImageGrab
+
+try:
+    from PIL import Image, ImageGrab  # type: ignore[import-untyped]
+    HAS_PILLOW = True
+except ImportError:
+    HAS_PILLOW = False
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +42,10 @@ class VisionPipeline:
         Args:
             session: ATOMSession instance to send images to
         """
+        if not HAS_PILLOW:
+            logger.warning("Vision pipeline skipped (Pillow/ImageGrab unavailable)")
+            return
+
         self.is_streaming = True
         
         try:

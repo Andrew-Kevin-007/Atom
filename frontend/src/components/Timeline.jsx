@@ -1,106 +1,64 @@
 import React, { useEffect, useRef } from 'react';
-import { AlertCircle, AlertTriangle, Info } from 'lucide-react';
+import { AlertOctagon, AlertTriangle, Info } from 'lucide-react';
+
+const SEVERITY = {
+  CRITICAL: { color: '#ff453a', bg: 'rgba(255,69,58,0.06)', Icon: AlertOctagon },
+  ERROR:    { color: '#ff9f0a', bg: 'rgba(255,159,10,0.06)', Icon: AlertTriangle },
+  WARNING:  { color: '#ffd60a', bg: 'rgba(255,214,10,0.05)', Icon: AlertTriangle },
+  INFO:     { color: 'rgba(255,255,255,0.32)', bg: 'rgba(255,255,255,0.02)', Icon: Info },
+};
 
 /**
- * Timeline Component
- * Chronological list of incident events color-coded by severity
- * INFO (grey), WARNING (amber), ERROR (orange), CRITICAL (red)
+ * Timeline — chronological severity-coded event log
  */
-export function Timeline({ events = [] }) {
-  const timelineEndRef = useRef(null);
-
-  // Auto-scroll to latest event
-  useEffect(() => {
-    timelineEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [events]);
-
-  // Get severity icon and color
-  const getSeverityStyle = (severity) => {
-    switch (severity) {
-      case 'CRITICAL':
-        return {
-          color: '#ff3333',
-          bgColor: 'rgba(255, 51, 51, 0.1)',
-          icon: AlertCircle,
-        };
-      case 'ERROR':
-        return {
-          color: '#ff8800',
-          bgColor: 'rgba(255, 136, 0, 0.1)',
-          icon: AlertTriangle,
-        };
-      case 'WARNING':
-        return {
-          color: '#ffaa00',
-          bgColor: 'rgba(255, 170, 0, 0.1)',
-          icon: AlertTriangle,
-        };
-      default:
-        return {
-          color: '#888888',
-          bgColor: 'rgba(136, 136, 136, 0.1)',
-          icon: Info,
-        };
-    }
-  };
+export default function Timeline({ events = [] }) {
+  const endRef = useRef(null);
+  useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [events]);
 
   return (
-    <div className="h-full bg-card rounded-lg border border-gray-700 overflow-hidden flex flex-col">
+    <div className="glass h-full flex flex-col overflow-hidden">
       {/* Header */}
-      <div className="px-4 py-3 border-b border-gray-700">
-        <h2 className="text-lg font-bold">Incident Timeline</h2>
+      <div className="flex items-center gap-2 px-4 py-3 border-b border-border">
+        <h2 className="text-[13px] font-semibold text-label-primary tracking-tight">Timeline</h2>
+        <span className="ml-auto text-[11px] text-label-tertiary font-mono">{events.length}</span>
       </div>
 
-      {/* Timeline */}
-      <div className="flex-1 overflow-y-auto p-4">
+      {/* Events */}
+      <div className="flex-1 overflow-y-auto p-3 space-y-1.5">
         {events.length === 0 ? (
-          <div className="text-center text-gray-500 mt-8">
-            <p className="text-sm">Waiting for events...</p>
+          <div className="h-full flex items-center justify-center">
+            <p className="text-[13px] text-label-tertiary">Waiting for events…</p>
           </div>
         ) : (
-          <div className="space-y-2">
-            {events.map((event, idx) => {
-              const severity = event.severity || 'INFO';
-              const style = getSeverityStyle(severity);
-              const Icon = style.icon;
-
-              return (
-                <div key={idx} className="relative">
-                  <div
-                    className="p-3 rounded border-l-2 text-xs"
-                    style={{
-                      backgroundColor: style.bgColor,
-                      borderColor: style.color,
-                    }}
-                  >
-                    <div className="flex items-start gap-2">
-                      <Icon size={14} color={style.color} className="flex-shrink-0 mt-0.5" />
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-1">
-                          <span
-                            className="px-2 py-0.5 rounded text-xs font-bold"
-                            style={{ color: style.color }}
-                          >
-                            {severity}
-                          </span>
-                          <span className="text-gray-400">{event.timestamp}</span>
-                          {event.source && (
-                            <span className="text-gray-500 text-xs">({event.source})</span>
-                          )}
-                        </div>
-                        <p className="text-gray-200 break-words">{event.message}</p>
-                      </div>
-                    </div>
-                  </div>
+          events.map((evt, i) => {
+            const sev = SEVERITY[evt.severity] || SEVERITY.INFO;
+            const { Icon } = sev;
+            return (
+              <div
+                key={i}
+                className="animate-fade-up rounded-xl border-l-2 px-3 py-2"
+                style={{
+                  animationDelay: `${Math.min(i * 0.03, 0.25)}s`,
+                  background: sev.bg,
+                  borderColor: sev.color,
+                }}
+              >
+                <div className="flex items-center gap-2 mb-0.5">
+                  <Icon size={12} style={{ color: sev.color }} className="flex-none" />
+                  <span className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: sev.color }}>
+                    {evt.severity || 'INFO'}
+                  </span>
+                  <span className="text-[11px] font-mono text-label-tertiary">{evt.ts}</span>
                 </div>
-              );
-            })}
-            <div ref={timelineEndRef} />
-          </div>
+                <p className="text-[12px] leading-snug text-label-secondary break-words pl-5">
+                  {evt.message}
+                </p>
+              </div>
+            );
+          })
         )}
+        <div ref={endRef} />
       </div>
     </div>
   );
 }
-
-export default Timeline;

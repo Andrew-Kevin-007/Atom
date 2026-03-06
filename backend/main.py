@@ -28,8 +28,13 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Load environment variables
-dotenv.load_dotenv()
+# Load environment variables — resolve .env relative to this file so it works
+# regardless of which directory uvicorn is launched from.
+_env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+if not os.path.isfile(_env_path):
+    # Also try workspace root (one level up from backend/)
+    _env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env")
+dotenv.load_dotenv(_env_path)
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GCP_PROJECT_ID = os.getenv("GCP_PROJECT_ID", "")

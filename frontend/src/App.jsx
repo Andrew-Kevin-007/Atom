@@ -1,284 +1,213 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { AlertCircle, Play, Square, Zap } from 'lucide-react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { Play, Square, Activity } from 'lucide-react';
 import SLACountdown from './components/SLACountdown';
 import WhispererFeed from './components/WhispererFeed';
 import Timeline from './components/Timeline';
 import Postmortem from './components/Postmortem';
 
-/**
- * ATOM - Autonomous Threat & Operations Monitor
- * Main application component - war room UI
- */
+const API = 'http://localhost:8000';
+const WS  = 'ws://localhost:8000/ws';
+
 function App() {
-  const [incident, setIncident] = useState(null);
-  const [messages, setMessages] = useState([]);
-  const [events, setEvents] = useState([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [status, setStatus] = useState('idle'); // idle, active, resolved
-  const [slaSecondsRemaining, setSlaSecondsRemaining] = useState(null);
+  const [incident, setIncident]       = useState(null);
+  const [messages, setMessages]       = useState([]);
+  const [events, setEvents]           = useState([]);
+  const [isLoading, setIsLoading]     = useState(false);
+  const [status, setStatus]           = useState('idle'); // idle | active | resolved
+  const [slaSeconds, setSlaSeconds]   = useState(null);
+  const [wsConnected, setWsConnected] = useState(false);
   const wsRef = useRef(null);
 
-  // WebSocket connection
-  useEffect(() => {
-    const connectWebSocket = () => {
-      try {
-        wsRef.current = new WebSocket('ws://localhost:8000/ws');
-
-        wsRef.current.onopen = () => {
-          console.log('✓ WebSocket connected');
-        };
-
-        wsRef.current.onmessage = (event) => {
-          const data = JSON.parse(event.data);
-          handleWebSocketMessage(data);
-        };
-
-        wsRef.current.onclose = () => {
-          console.log('✗ WebSocket disconnected');
-          // Attempt reconnection
-          setTimeout(connectWebSocket, 3000);
-        };
-
-        wsRef.current.onerror = (error) => {
-          console.error('WebSocket error:', error);
-        };
-      } catch (error) {
-        console.error('Failed to connect WebSocket:', error);
-      }
-    };
-
-    connectWebSocket();
-
-    return () => {
-      if (wsRef.current) {
-        wsRef.current.close();
-      }
-    };
-  }, []);
-
-  // Handle WebSocket messages
-  const handleWebSocketMessage = (data) => {
-    const timestamp = new Date().toLocaleTimeString();
-
+  /* ── WebSocket ─────────────────────────────────────────────── */
+  const handleWsMessage = useCallback((data) => {
+    const ts = new Date().toLocaleTimeString('en-US', { hour12: false });
     switch (data.type) {
       case 'incident_started':
-        setIncident({ id: data.incident_id, status: 'active' });
+        setIncident({ id: data.incident_id, name: data.name, status: 'active' });
         setStatus('active');
         setMessages([]);
         setEvents([]);
-        console.log(`🚀 Incident started: ${data.incident_id}`);
         break;
-
       case 'atom_response':
-        const atomMsg = {
-          type: 'atom_response',
-          text: data.text,
-          timestamp: timestamp,
-        };
-        setMessages(prev => [...prev, atomMsg]);
-        console.log(`🔊 ATOM: ${data.text}`);
+        setMessages(p => [...p, { type: 'atom', text: data.text, ts }]);
         break;
-
       case 'log_event':
-        const logEvent = {
+        setEvents(p => [...p, {
           message: data.message,
           severity: data.severity,
-          timestamp: timestamp,
+          ts,
           source: 'LOGS',
-        };
-        setEvents(prev => [...prev, logEvent]);
-
-        // Parse SLA messages
+        }]);
         if (data.message.includes('SLA breach imminent')) {
-          const match = data.message.match(/(\d+) seconds/);
-          if (match) {
-            setSlaSecondsRemaining(parseInt(match[1]));
-          }
+          const m = data.message.match(/(\d+) seconds/);
+          if (m) setSlaSeconds(parseInt(m[1]));
         }
         break;
-
       case 'incident_resolved':
         setStatus('resolved');
-        setIncident(prev => prev ? { ...prev, status: 'resolved' } : null);
-        console.log('✓ Incident resolved');
+        setIncident(p => p ? { ...p, status: 'resolved' } : null);
         break;
-
-      default:
-        break;
+      default: break;
     }
-  };
+  }, []);
 
-  // Start new incident
-  const handleStartIncident = async () => {
+  useEffect(() => {
+    let alive = true;
+    const connect = () => {
+      if (!alive) return;
+      const ws = new WebSocket(WS);
+      ws.onopen  = () => setWsConnected(true);
+      ws.onclose = () => { setWsConnected(false); setTimeout(connect, 3000); };
+      ws.onerror = () => ws.close();
+      ws.onmessage = (e) => handleWsMessage(JSON.parse(e.data));
+      wsRef.current = ws;
+    };
+    connect();
+    return () => { alive = false; wsRef.current?.close(); };
+  }, [handleWsMessage]);
+
+  /* ── Actions ───────────────────────────────────────────────── */
+  const startIncident = async () => {
     setIsLoading(true);
     try {
-      const response = await fetch('http://localhost:8000/incident/start', {
+      await fetch(`${API}/incident/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: 'Production Incident', incident_type: 'simulated' }),
       });
-
-      const data = await response.json();
-      console.log('Incident started:', data);
-    } catch (error) {
-      console.error('Failed to start incident:', error);
-      alert('Failed to start incident. Is the backend running?');
-    } finally {
-      setIsLoading(false);
-    }
+    } catch { alert('Backend unreachable — is uvicorn running?'); }
+    finally { setIsLoading(false); }
   };
 
-  // Stop incident
-  const handleStopIncident = async () => {
+  const stopIncident = async () => {
     if (!incident) return;
-
-    try {
-      await fetch(`http://localhost:8000/incident/${incident.id}/stop`, {
-        method: 'POST',
-      });
-
-      setIncident(null);
-      setStatus('idle');
-      setMessages([]);
-      setEvents([]);
-      setSlaSecondsRemaining(null);
-    } catch (error) {
-      console.error('Failed to stop incident:', error);
-    }
+    try { await fetch(`${API}/incident/${incident.id}/stop`, { method: 'POST' }); }
+    catch { /* ignore */ }
+    setIncident(null); setStatus('idle'); setMessages([]); setEvents([]); setSlaSeconds(null);
   };
 
+  /* ── Render ────────────────────────────────────────────────── */
   return (
-    <div
-      className="h-screen overflow-hidden"
-      style={{
-        backgroundColor: '#0a0a0f',
-        color: '#e0e0e0',
-        fontFamily: 'system-ui, -apple-system, sans-serif',
-      }}
-    >
-      {/* Top Bar */}
-      <div
-        className="border-b border-gray-700 px-6 py-4 flex items-center justify-between"
-        style={{ backgroundColor: '#12121a' }}
-      >
+    <div className="h-screen flex flex-col bg-surface-0 overflow-hidden select-none">
+
+      {/* ▸ Top Bar */}
+      <header className="flex-none flex items-center justify-between px-6 h-14 border-b border-border">
         <div className="flex items-center gap-3">
-          <div className="text-3xl">⚛️</div>
-          <div>
-            <h1 className="text-2xl font-bold">ATOM</h1>
-            <p style={{ color: '#888' }} className="text-xs">
-              Autonomous Threat &amp; Operations Monitor
-            </p>
+          <div className="relative flex items-center justify-center w-8 h-8">
+            <Activity size={20} className="text-accent-green" />
+            {status === 'active' && (
+              <span className="absolute inset-0 rounded-full bg-accent-green/20 animate-breathe" />
+            )}
+          </div>
+          <div className="leading-tight">
+            <h1 className="text-[15px] font-semibold tracking-tight text-label-primary">ATOM</h1>
+            <p className="text-[11px] text-label-tertiary tracking-wide">Autonomous Threat & Operations Monitor</p>
           </div>
         </div>
 
-        <div className="flex items-center gap-4">
-          {/* Status Badge */}
+        <div className="flex items-center gap-3">
+          {/* Status pill */}
           {incident && (
-            <div className="flex items-center gap-2">
-              <div
-                className="w-2 h-2 rounded-full animate-pulse"
-                style={{
-                  backgroundColor:
-                    status === 'resolved' ? '#00ff88' : status === 'active' ? '#ff3333' : '#888',
-                }}
-              />
-              <span className="text-sm font-mono" style={{ color: '#888' }}>
-                {incident.id}
-              </span>
+            <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-surface-2">
+              <span className={`w-1.5 h-1.5 rounded-full ${
+                status === 'resolved' ? 'bg-accent-green' : 'bg-accent-red animate-pulse'
+              }`} />
+              <span className="text-xs font-mono text-label-secondary">{incident.id}</span>
             </div>
           )}
 
-          {/* Action Buttons */}
+          {/* WS indicator */}
+          <span className={`w-1.5 h-1.5 rounded-full ${wsConnected ? 'bg-accent-green' : 'bg-label-tertiary'}`}
+            title={wsConnected ? 'Connected' : 'Disconnected'} />
+
+          {/* CTA */}
           {status === 'idle' ? (
             <button
-              onClick={handleStartIncident}
+              onClick={startIncident}
               disabled={isLoading}
-              className="flex items-center gap-2 px-4 py-2 rounded font-semibold transition-colors"
-              style={{
-                backgroundColor: '#00ff88',
-                color: '#000',
-                opacity: isLoading ? 0.5 : 1,
-              }}
+              className="flex items-center gap-2 h-8 px-4 rounded-full text-[13px] font-medium
+                         bg-accent-green text-black hover:brightness-110 active:scale-[0.97]
+                         disabled:opacity-40 disabled:pointer-events-none"
             >
-              <Play size={18} />
-              {isLoading ? 'Starting...' : 'Start Incident'}
+              <Play size={14} />
+              {isLoading ? 'Starting…' : 'Start Incident'}
             </button>
           ) : (
             <button
-              onClick={handleStopIncident}
-              className="flex items-center gap-2 px-4 py-2 rounded font-semibold transition-colors"
-              style={{
-                backgroundColor: '#ff3333',
-                color: '#fff',
-              }}
+              onClick={stopIncident}
+              className="flex items-center gap-2 h-8 px-4 rounded-full text-[13px] font-medium
+                         bg-accent-red/90 text-white hover:bg-accent-red active:scale-[0.97]"
             >
-              <Square size={18} />
+              <Square size={12} />
               Stop
             </button>
           )}
         </div>
-      </div>
+      </header>
 
-      {/* Main Content */}
+      {/* ▸ Body */}
       {status === 'idle' ? (
-        <div
-          className="h-full flex flex-col items-center justify-center"
-          style={{ backgroundColor: '#0a0a0f' }}
-        >
-          <Zap size={48} style={{ color: '#00ff88', marginBottom: '1rem' }} />
-          <h2 className="text-3xl font-bold mb-4">Ready to Monitor Incidents</h2>
-          <p style={{ color: '#888' }} className="mb-6 text-center max-w-xl">
-            ATOM is a real-time incident intelligence agent. Click "Start Incident" to begin a
-            simulated demo incident with full voice, screen, and log monitoring.
-          </p>
+        /* ── Hero / Idle State ──────────────────────────────────── */
+        <main className="flex-1 flex flex-col items-center justify-center gap-8 px-6">
+          <div className="relative">
+            <Activity size={52} strokeWidth={1.4} className="text-accent-green/80" />
+            <span className="absolute inset-0 rounded-full bg-accent-green/10 animate-breathe" />
+          </div>
 
-          <div
-            className="bg-gray-900 bg-opacity-50 border border-gray-700 rounded p-6 max-w-xl"
-            style={{ backgroundColor: '#1a1a1f' }}
-          >
-            <h3 className="font-bold mb-3">How it works:</h3>
-            <ul style={{ color: '#aaa' }} className="space-y-2 text-sm">
-              <li>• ATOM monitors microphone, screen, and production logs simultaneously</li>
-              <li>• Detects correlation between errors and system changes</li>
-              <li>• Speaks up proactively when SLA breach is imminent</li>
-              <li>• Suggests root cause and resolution</li>
-              <li>• Generates postmortem automatically</li>
+          <div className="text-center max-w-md space-y-3">
+            <h2 className="text-[28px] font-bold tracking-tight text-label-primary">
+              Ready to Monitor
+            </h2>
+            <p className="text-[15px] leading-relaxed text-label-secondary">
+              ATOM is a real-time incident intelligence agent. Start a simulated incident
+              with voice, screen, and log monitoring powered by Gemini.
+            </p>
+          </div>
+
+          <div className="glass p-6 max-w-lg w-full space-y-4">
+            <h3 className="text-[13px] font-semibold text-label-secondary uppercase tracking-widest">
+              How it works
+            </h3>
+            <ul className="space-y-2.5 text-[14px] text-label-secondary leading-snug">
+              {[
+                'Monitors microphone, screen & production logs simultaneously',
+                'Detects correlation between errors and system changes',
+                'Proactively alerts when SLA breach is imminent',
+                'Suggests root cause and resolution in real time',
+                'Auto-generates a complete postmortem',
+              ].map((t, i) => (
+                <li key={i} className="flex gap-2.5 items-start">
+                  <span className="mt-1.5 w-1 h-1 rounded-full bg-accent-green flex-none" />
+                  {t}
+                </li>
+              ))}
             </ul>
           </div>
 
           <button
-            onClick={handleStartIncident}
-            className="mt-8 px-8 py-3 rounded font-bold text-lg transition-colors"
-            style={{
-              backgroundColor: '#00ff88',
-              color: '#000',
-            }}
+            onClick={startIncident}
+            disabled={isLoading}
+            className="h-11 px-8 rounded-full text-[15px] font-semibold
+                       bg-accent-green text-black hover:brightness-110 active:scale-[0.97]
+                       disabled:opacity-40 disabled:pointer-events-none"
           >
-            Start Demo Incident
+            {isLoading ? 'Starting…' : 'Start Demo Incident'}
           </button>
-        </div>
+        </main>
       ) : (
-        <div className="h-full flex overflow-hidden">
-          {/* Left Panel (40%) */}
-          <div className="w-5/12 flex flex-col border-r border-gray-700 p-4 gap-4 overflow-hidden">
-            <div className="flex-1 min-h-0">
-              <WhispererFeed messages={messages} />
-            </div>
-            <div className="flex-1 min-h-0">
-              <Timeline events={events} />
-            </div>
+        /* ── War Room ──────────────────────────────────────────── */
+        <main className="flex-1 flex min-h-0 overflow-hidden">
+          {/* Left — Feed & Timeline */}
+          <div className="w-[42%] flex flex-col gap-3 p-3 min-h-0 border-r border-border">
+            <div className="flex-1 min-h-0"><WhispererFeed messages={messages} /></div>
+            <div className="flex-1 min-h-0"><Timeline events={events} /></div>
           </div>
-
-          {/* Right Panel (60%) */}
-          <div className="w-7/12 flex flex-col p-4 gap-4 overflow-hidden">
-            <div className="h-1/3 min-h-0">
-              <SLACountdown slaSecondsRemaining={slaSecondsRemaining} isResolved={status === 'resolved'} />
-            </div>
-            <div className="h-2/3 min-h-0">
-              <Postmortem incident={incident} />
-            </div>
+          {/* Right — SLA & Postmortem */}
+          <div className="flex-1 flex flex-col gap-3 p-3 min-h-0">
+            <div className="h-[38%] min-h-0"><SLACountdown seconds={slaSeconds} resolved={status === 'resolved'} /></div>
+            <div className="flex-1 min-h-0"><Postmortem incident={incident} /></div>
           </div>
-        </div>
+        </main>
       )}
     </div>
   );

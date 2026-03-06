@@ -1,78 +1,107 @@
-import React, { useState, useEffect } from 'react';
-import { AlertTriangle, Clock } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { ShieldAlert, CheckCircle2, Clock } from 'lucide-react';
 
 /**
- * SLACountdown Component
- * Displays dramatic SLA breach countdown with color transitions
- * Green → Amber (5 min) → Red (2 min) → Flashing Red (30 sec)
+ * SLA Countdown — Apple-dark aesthetic
+ * Counts down locally once a target is received from WS.
+ * Green → Amber (5 min) → Red (2 min) → Pulsing Red (30 s)
  */
-export function SLACountdown({ slaSecondsRemaining, isResolved }) {
-  const [isFlashing, setIsFlashing] = useState(false);
+export default function SLACountdown({ seconds: initialSeconds, resolved }) {
+  const [remaining, setRemaining] = useState(null);
+  const intervalRef = useRef(null);
 
-  // Flash effect when under 30 seconds
+  // Sync from parent whenever a new SLA value arrives
   useEffect(() => {
-    if (slaSecondsRemaining !== null && slaSecondsRemaining < 30 && !isResolved) {
-      const interval = setInterval(() => {
-        setIsFlashing(prev => !prev);
-      }, 500);
-      return () => clearInterval(interval);
-    }
-    setIsFlashing(false);
-  }, [slaSecondsRemaining, isResolved]);
+    if (initialSeconds == null) return;
+    setRemaining(initialSeconds);
+  }, [initialSeconds]);
 
-  // Determine color based on SLA time remaining
-  const getColor = () => {
-    if (isResolved) return '#00ff88';
-    if (slaSecondsRemaining === null) return '#e0e0e0';
-    if (slaSecondsRemaining < 30) return isFlashing ? '#ff3333' : '#1a1a1f';
-    if (slaSecondsRemaining < 120) return '#ff3333';
-    if (slaSecondsRemaining < 300) return '#ffaa00';
-    return '#00ff88';
+  // Local 1-second tick
+  useEffect(() => {
+    clearInterval(intervalRef.current);
+    if (remaining == null || remaining <= 0 || resolved) return;
+    intervalRef.current = setInterval(() => {
+      setRemaining(p => (p != null && p > 0 ? p - 1 : 0));
+    }, 1000);
+    return () => clearInterval(intervalRef.current);
+  }, [remaining != null, resolved]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const fmt = () => {
+    if (resolved)        return 'RESOLVED';
+    if (remaining == null) return '--:--';
+    const m = Math.floor(remaining / 60);
+    const s = remaining % 60;
+    return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
   };
 
-  // Format time display
-  const formatTime = () => {
-    if (isResolved) return 'RESOLVED';
-    if (slaSecondsRemaining === null) return '--:--';
-    
-    const minutes = Math.floor(slaSecondsRemaining / 60);
-    const seconds = slaSecondsRemaining % 60;
-    return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+  const color = () => {
+    if (resolved)              return '#30d158';
+    if (remaining == null)     return 'rgba(255,255,255,0.25)';
+    if (remaining < 30)        return '#ff453a';
+    if (remaining < 120)       return '#ff453a';
+    if (remaining < 300)       return '#ffd60a';
+    return '#30d158';
   };
+
+  const critical = remaining != null && remaining < 120 && !resolved;
+  const flash    = remaining != null && remaining < 30  && !resolved;
 
   return (
-    <div className="bg-card p-6 rounded-lg border border-gray-700 h-full flex flex-col justify-center items-center">
-      {isResolved ? (
-        <div className="text-center">
-          <h2 className="text-2xl font-bold mb-4" style={{ color: '#00ff88' }}>
-            ✓ INCIDENT RESOLVED
-          </h2>
-          <p className="text-gray-400">All systems nominal</p>
+    <div className="glass h-full flex flex-col items-center justify-center p-6 relative overflow-hidden">
+      {/* Danger glow */}
+      {critical && (
+        <div
+          className="absolute inset-0 pointer-events-none"
+          style={{
+            background: `radial-gradient(ellipse at 50% 60%, ${color()}15 0%, transparent 70%)`,
+          }}
+        />
+      )}
+
+      {resolved ? (
+        <div className="animate-fade-up text-center z-10 space-y-2">
+          <CheckCircle2 size={36} className="mx-auto text-accent-green" />
+          <h2 className="text-xl font-semibold text-accent-green tracking-tight">Incident Resolved</h2>
+          <p className="text-[13px] text-label-tertiary">All systems nominal</p>
         </div>
-      ) : slaSecondsRemaining !== null && slaSecondsRemaining < 120 ? (
-        <>
-          <div className="flex items-center gap-3 mb-4">
-            <AlertTriangle color="#ff3333" size={32} />
-            <span className="text-xl font-bold text-red-500">SLA BREACH IMMINENT</span>
-          </div>
-          <div className="text-7xl font-mono font-bold mb-4" style={{ color: getColor() }}>
-            {formatTime()}
-          </div>
-          <p className="text-gray-400 text-center">Payments service at critical latency</p>
-        </>
       ) : (
-        <>
-          <div className="flex items-center gap-2 mb-4">
-            <Clock size={24} color={getColor()} />
-            <span className="text-gray-400">Time to SLA</span>
+        <div className="z-10 flex flex-col items-center gap-4">
+          {critical ? (
+            <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-accent-red/10">
+              <ShieldAlert size={14} className="text-accent-red" />
+              <span className="text-[12px] font-semibold tracking-wide text-accent-red uppercase">
+                SLA Breach Imminent
+              </span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <Clock size={16} style={{ color: color() }} />
+              <span className="text-[12px] text-label-tertiary uppercase tracking-widest font-medium">
+                Time to SLA
+              </span>
+            </div>
+          )}
+
+          <div
+            className={`font-mono font-bold tracking-tighter leading-none ${
+              flash ? 'animate-countdown-pulse' : ''
+            }`}
+            style={{
+              color: color(),
+              fontSize: critical ? '5rem' : '4rem',
+              transition: 'color 0.6s ease, font-size 0.4s ease',
+            }}
+          >
+            {fmt()}
           </div>
-          <div className="text-6xl font-mono font-bold" style={{ color: getColor() }}>
-            {formatTime()}
-          </div>
-        </>
+
+          {critical && (
+            <p className="text-[13px] text-label-secondary text-center">
+              Payments service at critical latency
+            </p>
+          )}
+        </div>
       )}
     </div>
   );
 }
-
-export default SLACountdown;

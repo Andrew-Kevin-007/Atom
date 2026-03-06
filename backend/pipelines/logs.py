@@ -80,9 +80,11 @@ class LogPipeline:
                 # Log locally
                 logger.info(f"📝 [{timestamp}] {log_message}")
                 
-                # Notify callback
+                # Notify callback (may return a coroutine / Task)
                 if self.on_log:
-                    self.on_log(log_message, timestamp, severity)
+                    result = self.on_log(log_message, timestamp, severity)
+                    if asyncio.isfuture(result) or asyncio.iscoroutine(result):
+                        await result
                 
                 # Save to Firestore
                 if firestore_manager:
