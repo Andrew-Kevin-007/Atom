@@ -47,12 +47,19 @@ class AudioPipeline:
 
             while self.is_streaming and session.is_active:
                 try:
-                    # In cloud mock mode, keep pipeline alive without flooding Gemini
-                    await asyncio.sleep(1.0)
+                    # Simulate audio chunk (would come from microphone in production)
+                    # Create a few bytes of dummy PCM data
+                    mock_chunk = b'\x00' * self.CHUNK_SIZE
+                    
+                    # Send to ATOM session
+                    await session.send_audio(mock_chunk)
+
+                    # Small delay to simulate microphone capture
+                    await asyncio.sleep(0.05)  # 50ms chunks
 
                 except Exception as e:
-                    logger.error(f"Error in audio pipeline: {e}")
-                    await asyncio.sleep(1.0)
+                    logger.error(f"Error sending audio chunk: {e}")
+                    await asyncio.sleep(0.1)
 
             logger.info("✓ Audio pipeline stopped gracefully")
 
@@ -67,4 +74,3 @@ class AudioPipeline:
         """
         self.is_streaming = False
         logger.info("Audio pipeline stopped")
-

@@ -5,7 +5,6 @@ Simulates live incident logs and streams to Gemini Live API
 
 import asyncio
 import logging
-import re
 from datetime import datetime
 from typing import Any, Callable, Optional
 
@@ -100,15 +99,6 @@ class LogPipeline:
                         "LOGS"
                     )
                     print(f"[LOGS] Saved to Firestore timeline")
-                    
-                    # Handle SLA deadline when breach is imminent
-                    if "SLA breach imminent" in log_message:
-                        # Extract seconds remaining
-                        match = re.search(r'(\d+)\s+seconds', log_message)
-                        if match:
-                            sla_seconds = int(match.group(1))
-                            await firestore_manager.update_sla_deadline(incident_id, sla_seconds)
-                            print(f"[LOGS] SLA deadline set: {sla_seconds} seconds remaining")
                 
                 # Wait before next log (except last one)
                 if i < len(self.DEMO_LOGS) - 1:

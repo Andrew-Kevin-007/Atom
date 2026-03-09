@@ -150,7 +150,9 @@ When incident is resolved, announce it clearly and summarize the postmortem"""
                             if part.text:
                                 logger.info(f"🔊 ATOM: {part.text}")
                                 if self.on_response:
-                                    self.on_response(part.text)
+                                    result = self.on_response(part.text)
+                                    if asyncio.iscoroutine(result):
+                                        await result
 
         except asyncio.CancelledError:
             logger.info("Response listener cancelled")
@@ -220,6 +222,39 @@ When incident is resolved, announce it clearly and summarize the postmortem"""
             )
         except Exception as e:
             logger.error(f"Error sending log: {e}")
+
+    async def generate_postmortem(self, logs: list) -> dict:
+        """Generate a structured postmortem from incident logs using Gemini."""
+        import json as _json
+
+        prompt = (
+            "Based on these production incident logs, generate a JSON postmortem. "
+            "Respond ONLY with valid JSON (no markdown fences). Keys: "
+            "summary (string), rootCause (string), impact (string), "
+            "resolution (string), actionItems (array of strings).\n\nLogs:\n"
+            + "\n".join(logs)
+        )
+        try:
+            response = await self.client.aio.models.generate_content(
+                model="gemini-2.0-flash",
+                contents=prompt,
+            )
+            text = response.text.strip()
+            if text.startswith("```"):
+                text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+            return _json.loads(text)
+        except Exception as e:
+            logger.error(f"Failed to generate postmortem: {type(e).__name__}: {e}")
+            return {
+                "summary": "Auto-generated postmortem unavailable",
+                "rootCause": "See incident logs for details",
+                "impact": "Review required",
+                "resolution": "Incident was resolved via rollback",
+                "actionItems": [
+                    "Review incident timeline",
+                    "Investigate root cause manually",
+                ],
+            }
 
     async def stop(self) -> None:
         """

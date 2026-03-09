@@ -7,7 +7,6 @@ import os
 sys.path.append(os.path.dirname(__file__))
 import asyncio
 import logging
-import os
 import re
 import uuid
 from contextlib import asynccontextmanager
@@ -39,7 +38,7 @@ if not os.path.isfile(_env_path):
     _env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env")
 dotenv.load_dotenv(_env_path)
 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip().strip('"').strip("'")
 GCP_PROJECT_ID = os.getenv("GCP_PROJECT_ID", "")
 
 
@@ -225,8 +224,20 @@ async def run_incident(incident_id: str) -> None:
         # Create incident in Firestore
         await firestore_manager.create_incident(incident_id)
         
-        # Start ATOM session
-        await atom_session.start()
+        # Try to start ATOM session (non-fatal — runs in degraded mode if Gemini is unavailable)
+        gemini_active = False
+        try:
+            await atom_session.start()
+            gemini_active = True
+        except Exception as e:
+            logger.warning(f"⚠️  Gemini Live session failed: {e}")
+            logger.warning("Continuing in degraded mode (logs/SLA will still run)")
+            await broadcast_to_clients({
+                "type": "atom_response",
+                "incident_id": incident_id,
+                "text": f"⚠️ Gemini Live unavailable — running in log-only mode.",
+                "timestamp": "",
+            })
         
         # Create pipelines with callbacks
         audio_pipeline = AudioPipeline()
@@ -244,48 +255,77 @@ async def run_incident(incident_id: str) -> None:
             "audio": audio_pipeline,
             "vision": vision_pipeline,
             "logs": log_pipeline,
-            "tasks": [],
         }
         
-        # Start all pipelines concurrently
+        # Start audio/vision as background tasks (only if Gemini is active)
         logger.info(f"🚀 Starting all pipelines for incident {incident_id}")
-        print(f"[INCIDENT] Starting all pipelines: audio, vision, logs, gemini")
+        print(f"[INCIDENT] Starting pipelines (gemini={'ON' if gemini_active else 'OFF'})")
         
-        # Create tasks
-        audio_task = asyncio.create_task(audio_pipeline.start_streaming(atom_session))
-        vision_task = asyncio.create_task(vision_pipeline.stream(atom_session))
-        log_task = asyncio.create_task(
-            log_pipeline.simulate_incident(atom_session, firestore_manager, incident_id)
-        )
+        audio_task = None
+        vision_task = None
+        if gemini_active:
+            audio_task = asyncio.create_task(audio_pipeline.start_streaming(atom_session))
+            vision_task = asyncio.create_task(vision_pipeline.stream(atom_session))
         
-        # Wait for all tasks to complete simultaneously
-        print(f"[INCIDENT] Awaiting all pipelines to complete...")
-        results = await asyncio.gather(audio_task, vision_task, log_task, return_exceptions=True)
-        print(f"[INCIDENT] All pipelines completed: {[type(r).__name__ for r in results]}")
+        # Run log simulation (completes after all demo logs)
+        await log_pipeline.simulate_incident(atom_session, firestore_manager, incident_id)
+        print(f"[INCIDENT] Log simulation complete, stopping pipelines")
+        
+        # Stop audio/vision pipelines
+        await audio_pipeline.stop()
+        await vision_pipeline.stop()
+        if audio_task and vision_task:
+            await asyncio.gather(audio_task, vision_task, return_exceptions=True)
+        
+        # Generate postmortem via Gemini
+        print(f"[INCIDENT] Generating postmortem...")
+        postmortem = await atom_session.generate_postmortem(LogPipeline.DEMO_LOGS)
+        
+        # Broadcast postmortem to frontend
+        await broadcast_to_clients({
+            "type": "postmortem_update",
+            "incident_id": incident_id,
+            "content": postmortem,
+        })
+        await firestore_manager.update_postmortem(incident_id, postmortem)
         
         # Announce resolution
-        await on_atom_response(incident_id, "INCIDENT RESOLVED. Generating postmortem...")
+        await broadcast_to_clients({
+            "type": "atom_response",
+            "incident_id": incident_id,
+            "text": "Incident resolved. Postmortem generated.",
+            "timestamp": "",
+        })
         
-        # Update status
+        # Resolve incident
         await firestore_manager.resolve_incident(incident_id, "Incident resolved successfully")
-        
-        # Broadcast incident resolved event
         await broadcast_to_clients({
             "type": "incident_resolved",
             "incident_id": incident_id,
         })
+        print(f"[INCIDENT] Incident {incident_id} fully resolved")
         
     except asyncio.CancelledError:
         logger.info(f"Incident {incident_id} cancelled")
     except Exception as e:
         logger.error(f"Error in incident orchestration: {e}")
+        # Notify frontend of failure (WB-3)
+        try:
+            await broadcast_to_clients({
+                "type": "incident_error",
+                "incident_id": incident_id,
+                "error": str(e),
+            })
+        except Exception:
+            pass
     finally:
         # Cleanup
         if incident_id in active_incidents:
             try:
                 await active_incidents[incident_id]["session"].stop()
-            except Exception as e:
-                logger.error(f"Error stopping session: {e}")
+            except Exception:
+                pass
+            del active_incidents[incident_id]
 
 
 @asynccontextmanager
@@ -334,7 +374,7 @@ app = FastAPI(
 # Add CORS middleware for frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000", "ws://localhost:5173", "*"],
+    allow_origins=["http://localhost:5173", "http://localhost:3000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -353,9 +393,15 @@ async def start_incident(request: IncidentRequest) -> IncidentResponse:
     Returns:
         Incident ID and status
     """
+    if active_incidents:
+        raise HTTPException(status_code=409, detail="An incident is already active")
+    
     incident_id = str(uuid.uuid4())[:8]
     
     logger.info(f"📍 Starting incident: {incident_id}")
+    
+    # Reserve the slot immediately so duplicate starts are blocked
+    active_incidents[incident_id] = {"status": "starting"}
     
     # Start incident orchestration in background
     asyncio.create_task(run_incident(incident_id))
@@ -439,6 +485,34 @@ async def get_incident(incident_id: str) -> Dict:
     except Exception as e:
         logger.error(f"Error retrieving incident: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/debug/test-postmortem")
+async def debug_test_postmortem():
+    """Diagnostic: test if Gemini generate_content works."""
+    from google import genai
+    key = GEMINI_API_KEY
+    raw = os.getenv("GEMINI_API_KEY", "")
+    result = {
+        "key_present": bool(key),
+        "key_length": len(key),
+        "raw_length": len(raw),
+        "key_first3": key[:3] if key else "",
+        "key_last3": key[-3:] if key else "",
+        "raw_repr_ends": repr(raw[:5]) + "..." + repr(raw[-5:]) if raw else "",
+    }
+    if not key:
+        return result
+    try:
+        client = genai.Client(api_key=key)
+        resp = await client.aio.models.generate_content(
+            model="gemini-2.0-flash",
+            contents="Say hello in one word. Respond with only that word.",
+        )
+        result["gemini-2.0-flash"] = {"success": True, "text": resp.text[:200]}
+    except Exception as e:
+        result["gemini-2.0-flash"] = {"success": False, "error": f"{type(e).__name__}: {e}"}
+    return result
 
 
 @app.websocket("/ws")
@@ -555,9 +629,12 @@ async def root() -> Dict:
 if __name__ == "__main__":
     import uvicorn
     
+    # Read PORT from environment (Cloud Run sets this)
+    port = int(os.environ.get("PORT", 8000))
+    
     uvicorn.run(
         app,
         host="0.0.0.0",
-        port=8000,
+        port=port,
         log_level="info",
     )

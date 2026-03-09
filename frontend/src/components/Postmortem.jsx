@@ -92,12 +92,6 @@ export default function Postmortem({ incident = null, postmortem = null }) {
                 </ul>
               </section>
             )}
-
-            {!hasContent && (
-              <p className="text-center text-[13px] text-label-tertiary py-6">
-                Postmortem populates as the incident progresses…
-              </p>
-            )}
           </div>
         )}
       </div>

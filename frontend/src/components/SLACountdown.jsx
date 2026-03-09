@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ShieldAlert, CheckCircle2, Clock } from 'lucide-react';
 
 /**
@@ -8,7 +8,6 @@ import { ShieldAlert, CheckCircle2, Clock } from 'lucide-react';
  */
 export default function SLACountdown({ seconds: initialSeconds, resolved }) {
   const [remaining, setRemaining] = useState(null);
-  const intervalRef = useRef(null);
 
   // Sync from parent whenever a new SLA value arrives
   useEffect(() => {
@@ -17,14 +16,14 @@ export default function SLACountdown({ seconds: initialSeconds, resolved }) {
   }, [initialSeconds]);
 
   // Local 1-second tick
+  const isCountingDown = remaining != null && remaining > 0 && !resolved;
   useEffect(() => {
-    clearInterval(intervalRef.current);
-    if (remaining == null || remaining <= 0 || resolved) return;
-    intervalRef.current = setInterval(() => {
+    if (!isCountingDown) return;
+    const id = setInterval(() => {
       setRemaining(p => (p != null && p > 0 ? p - 1 : 0));
     }, 1000);
-    return () => clearInterval(intervalRef.current);
-  }, [remaining != null, resolved]); // eslint-disable-line react-hooks/exhaustive-deps
+    return () => clearInterval(id);
+  }, [isCountingDown]);
 
   const fmt = () => {
     if (resolved)        return 'RESOLVED';

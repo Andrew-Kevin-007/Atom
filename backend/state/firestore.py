@@ -3,6 +3,7 @@ Google Firestore state manager for ATOM
 Persists incident timeline, hypotheses, and postmortem
 """
 
+import asyncio
 import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -67,7 +68,9 @@ class FirestoreManager:
                 "postmortem": {},
             }
             
-            self.db.collection(self.collection).document(incident_id).set(incident_data)
+            await asyncio.to_thread(
+                lambda: self.db.collection(self.collection).document(incident_id).set(incident_data)
+            )
             logger.info(f"✓ Incident '{incident_id}' created in Firestore")
             
             return incident_data
@@ -106,9 +109,11 @@ class FirestoreManager:
                 "source": source,
             }
             
-            self.db.collection(self.collection).document(incident_id).update({
-                "timeline": _firestore.ArrayUnion([event])  # type: ignore[union-attr]
-            })
+            await asyncio.to_thread(
+                lambda: self.db.collection(self.collection).document(incident_id).update({
+                    "timeline": _firestore.ArrayUnion([event])  # type: ignore[union-attr]
+                })
+            )
             
             return True
             
@@ -131,9 +136,11 @@ class FirestoreManager:
             return False
 
         try:
-            self.db.collection(self.collection).document(incident_id).update({
-                "sla_remaining_seconds": seconds_remaining
-            })
+            await asyncio.to_thread(
+                lambda: self.db.collection(self.collection).document(incident_id).update({
+                    "sla_remaining_seconds": seconds_remaining
+                })
+            )
             
             return True
             
@@ -168,9 +175,11 @@ class FirestoreManager:
                 "confidence": confidence,
             }
             
-            self.db.collection(self.collection).document(incident_id).update({
-                "hypotheses": _firestore.ArrayUnion([hyp_entry])  # type: ignore[union-attr]
-            })
+            await asyncio.to_thread(
+                lambda: self.db.collection(self.collection).document(incident_id).update({
+                    "hypotheses": _firestore.ArrayUnion([hyp_entry])  # type: ignore[union-attr]
+                })
+            )
             
             return True
             
@@ -193,9 +202,11 @@ class FirestoreManager:
             return False
 
         try:
-            self.db.collection(self.collection).document(incident_id).update({
-                "postmortem": content
-            })
+            await asyncio.to_thread(
+                lambda: self.db.collection(self.collection).document(incident_id).update({
+                    "postmortem": content
+                })
+            )
             
             return True
             
@@ -218,11 +229,13 @@ class FirestoreManager:
             return False
 
         try:
-            self.db.collection(self.collection).document(incident_id).update({
-                "status": "resolved",
-                "resolved_at": datetime.now(),
-                "resolution_summary": summary,
-            })
+            await asyncio.to_thread(
+                lambda: self.db.collection(self.collection).document(incident_id).update({
+                    "status": "resolved",
+                    "resolved_at": datetime.now(),
+                    "resolution_summary": summary,
+                })
+            )
             
             logger.info(f"✓ Incident '{incident_id}' marked as resolved")
             
@@ -246,7 +259,9 @@ class FirestoreManager:
             return None
 
         try:
-            doc = self.db.collection(self.collection).document(incident_id).get()
+            doc = await asyncio.to_thread(
+                lambda: self.db.collection(self.collection).document(incident_id).get()
+            )
             
             if doc.exists:
                 return doc.to_dict()

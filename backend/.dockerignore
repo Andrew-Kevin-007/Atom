@@ -1,0 +1,11 @@
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.env
+.git/
+.gitignore
+Dockerfile
+.dockerignore
+Procfile
+runtime.txt

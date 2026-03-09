@@ -1,0 +1,16 @@
+# Ignore local dependencies and build artifacts
+backend/venv/
+frontend/node_modules/
+frontend/dist/
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/.DS_Store
+.git/
+.gitignore
+.env
+*.log
+.pytest_cache/
+.venv/
+env/
+venv/

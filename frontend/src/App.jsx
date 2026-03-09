@@ -5,8 +5,8 @@ import WhispererFeed from './components/WhispererFeed';
 import Timeline from './components/Timeline';
 import Postmortem from './components/Postmortem';
 
-const API = 'http://localhost:8000';
-const WS  = 'ws://localhost:8000/ws';
+const API = 'https://atom-backend-803244244025.asia-south1.run.app';
+const WS  = 'wss://atom-backend-803244244025.asia-south1.run.app/ws';
 
 function App() {
   const [incident, setIncident]       = useState(null);
@@ -64,6 +64,15 @@ function App() {
         console.log('[WS] Incident resolved');
         setStatus('resolved');
         setIncident(p => p ? { ...p, status: 'resolved' } : null);
+        break;
+        
+      case 'incident_error':
+        console.error('[WS] Incident error:', data.error);
+        setStatus('idle');
+        setIncident(null);
+        break;
+
+      case 'ping':
         break;
         
       default:
